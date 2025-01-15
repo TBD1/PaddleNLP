@@ -692,26 +692,53 @@ class GenerationBlockInferenceModel(GenerationMixin):
         ):
             step_idx = model_kwargs["step_idx"]
             logits = paddle.cast(outputs, paddle.float32)
+            if paddle.is_compiled_with_custom_device("npu"):
+                from paddlenlp_ops import (
+                    get_token_penalty_multi_scores_v2,
+                    set_value_by_flags_and_idx_v2,
+                )
 
-            from paddlenlp_ops import set_preids_token_penalty_multi_scores
+                set_value_by_flags_and_idx_v2(
+                    model_kwargs["pre_ids"],
+                    model_kwargs["input_ids"],
+                    model_kwargs["seq_lens_this_time"],
+                    model_kwargs["seq_lens_encoder"],
+                    model_kwargs["seq_lens_decoder"],
+                    step_idx,
+                    model_kwargs["stop_flags"],
+                )
+                logits = get_token_penalty_multi_scores_v2(
+                    model_kwargs["pre_ids"],
+                    logits,
+                    penalty_score,
+                    frequency_score,
+                    presence_score,
+                    temperature,
+                    model_kwargs["bad_tokens"],
+                    step_idx,
+                    model_kwargs["min_dec_len"],
+                    eos_token_id,
+                )
+            else:
+                from paddlenlp_ops import set_preids_token_penalty_multi_scores
 
-            set_preids_token_penalty_multi_scores(
-                model_kwargs["pre_ids"],
-                model_kwargs["input_ids"],
-                model_kwargs["seq_lens_encoder"],
-                model_kwargs["seq_lens_decoder"],
-                step_idx,
-                model_kwargs["stop_flags"],
-                logits,
-                penalty_score,
-                frequency_score,
-                presence_score,
-                temperature,
-                model_kwargs["bad_tokens"],
-                step_idx,
-                model_kwargs["min_dec_len"],
-                eos_token_id,
-            )
+                set_preids_token_penalty_multi_scores(
+                    model_kwargs["pre_ids"],
+                    model_kwargs["input_ids"],
+                    model_kwargs["seq_lens_encoder"],
+                    model_kwargs["seq_lens_decoder"],
+                    step_idx,
+                    model_kwargs["stop_flags"],
+                    logits,
+                    penalty_score,
+                    frequency_score,
+                    presence_score,
+                    temperature,
+                    model_kwargs["bad_tokens"],
+                    step_idx,
+                    model_kwargs["min_dec_len"],
+                    eos_token_id,
+                )
 
             # sample
             probs = F.softmax(logits)
@@ -727,23 +754,55 @@ class GenerationBlockInferenceModel(GenerationMixin):
             if self.config.tensor_parallel_degree > 1:
                 paddle.distributed.broadcast(next_tokens, 0)
 
-            from paddlenlp_ops import update_inputs_v2
+            if paddle.is_compiled_with_custom_device("npu"):
+                step_idx = paddle.where(
+                    model_kwargs["stop_flags"], model_kwargs["step_idx"], model_kwargs["step_idx"] + 1
+                )
+                paddle.assign(step_idx, model_kwargs["step_idx"])
+                length_cond = paddle.greater_equal(step_idx, model_kwargs["max_dec_len"])
+                stop_flags = paddle.logical_or(model_kwargs["stop_flags"], length_cond)
+                from paddlenlp_ops import set_stop_value_multi_ends_v2
 
-            update_inputs_v2(
-                model_kwargs["stop_flags"],
-                model_kwargs["step_idx"],
-                model_kwargs["not_need_stop"],
-                model_kwargs["seq_lens_this_time"],
-                model_kwargs["seq_lens_encoder"],
-                model_kwargs["seq_lens_decoder"],
-                model_kwargs["max_dec_len"],
-                model_kwargs["input_ids"],
-                model_kwargs["stop_nums"],
-                next_tokens,
-                model_kwargs["is_block_step"],
-                eos_token_id,
-                model_kwargs["next_tokens"],
-            )
+                set_stop_value_multi_ends_v2(
+                    next_tokens,
+                    stop_flags,
+                    model_kwargs["seq_lens_this_time"],
+                    eos_token_id,
+                    model_kwargs["next_tokens"],
+                )  # multi ends
+                paddle.assign(stop_flags, model_kwargs["stop_flags"])
+                # update inputs
+                from paddlenlp_ops import update_inputs
+
+                update_inputs(
+                    stop_flags,
+                    model_kwargs["not_need_stop"],
+                    model_kwargs["seq_lens_this_time"],
+                    model_kwargs["seq_lens_encoder"],
+                    model_kwargs["seq_lens_decoder"],
+                    model_kwargs["input_ids"],
+                    model_kwargs["stop_nums"],
+                    next_tokens,
+                    model_kwargs["is_block_step"],
+                )
+            else:
+                from paddlenlp_ops import update_inputs_v2
+
+                update_inputs_v2(
+                    model_kwargs["stop_flags"],
+                    model_kwargs["step_idx"],
+                    model_kwargs["not_need_stop"],
+                    model_kwargs["seq_lens_this_time"],
+                    model_kwargs["seq_lens_encoder"],
+                    model_kwargs["seq_lens_decoder"],
+                    model_kwargs["max_dec_len"],
+                    model_kwargs["input_ids"],
+                    model_kwargs["stop_nums"],
+                    next_tokens,
+                    model_kwargs["is_block_step"],
+                    eos_token_id,
+                    model_kwargs["next_tokens"],
+                )
 
             from paddlenlp_ops import save_output
 

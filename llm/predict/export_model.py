@@ -83,7 +83,7 @@ def main():
         export_args.output_path = os.path.join(export_args.output_path, f"rank_{tensor_parallel_rank}")
 
     if predictor_args.device == "npu":
-        from npu.llama.export_utils import process_params
+        from llm.npu.llama.export_utils import process_params
 
         process_params(os.path.join(export_args.output_path, predictor_args.model_prefix))
 

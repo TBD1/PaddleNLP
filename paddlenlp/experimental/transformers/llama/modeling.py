@@ -1390,9 +1390,15 @@ class LlamaBlockInferenceModel(LlamaInferenceModel):
         token_num = paddle.sum(seq_lens_this_time)
         from paddlenlp_ops import get_padding_offset_v2
 
-        ids_remove_padding, cum_offsets, padding_offset, cu_seqlens_q, cu_seqlens_k = get_padding_offset_v2(
-            input_ids, cum_offsets_now, token_num, seq_lens_this_time, draft_tokens, seq_lens_encoder
-        )
+        # whether speculative decoding or not
+        if draft_tokens is None and seq_lens_encoder is None:
+            ids_remove_padding, cum_offsets, padding_offset, cu_seqlens_q, cu_seqlens_k = get_padding_offset_v2(
+                input_ids, cum_offsets_now, token_num, seq_lens_this_time
+            )
+        else:
+            ids_remove_padding, cum_offsets, padding_offset, cu_seqlens_q, cu_seqlens_k = get_padding_offset_v2(
+                input_ids, cum_offsets_now, token_num, seq_lens_this_time, draft_tokens, seq_lens_encoder
+            )
         return ids_remove_padding, padding_offset, cum_offsets, cu_seqlens_q, cu_seqlens_k
 
     def forward(
